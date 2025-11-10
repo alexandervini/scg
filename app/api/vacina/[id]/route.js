@@ -1,19 +1,17 @@
-import { Pool } from 'pg';
+import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
-// Configuração do Pool de Conexões
-const pool = new Pool({
-  host: 'localhost',
-  port: 5432,
-  database: 'postgres',
-  user: 'postgres',
-  password: '25052003',
-});
+// Configuração do Supabase (use variáveis de ambiente no seu projeto real)
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://zvgehtwivjrtlplyjqbu.supabase.co";
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2Z2VodHdpdmpydGxwbHlqcWJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI3MzU4NDIsImV4cCI6MjA3ODMxMTg0Mn0.Pju7Jajk9yOebZSaZLmJGHVvGv_u89zAOPBzP4br0hA";
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-// PUT - Atualizar  vacina pelo NOME
+// PUT - Atualizar vacina pelo NOME
+// Este arquivo deve estar em: app/api/vacinas/[nomeVacina]/route.js
 export async function PUT(request, { params }) {
   try {
-    const { id } = await params; // Await necessário no Next.js 15+
+    // O Next.js App Router passa o parâmetro de rota (ex: [nomeVacina]) em params
+    const { id } = params; 
     const nomeAntigo = decodeURIComponent(id);
     const data = await request.json();
     const { nome, periodicidade_dias } = data;
@@ -22,34 +20,64 @@ export async function PUT(request, { params }) {
       return NextResponse.json({ error: 'O nome da vacina é obrigatório' }, { status: 400 });
     }
     
-    const result = await pool.query(
-      `UPDATE vacinas 
-       SET nome = $1, periodicidade_dias = $2
-       WHERE nome = $3 RETURNING *`,
-      [nome, periodicidade_dias || null, nomeAntigo]
-    );
+    // Adaptação para Supabase
+    const { data: updatedVacina, error: updateError } = await supabase
+      .from('vacinas')
+      .update({ 
+        nome: nome, 
+        periodicidade_dias: periodicidade_dias || null 
+      })
+      .eq('nome', nomeAntigo)
+      .select() // Adiciona .select() para retornar os dados atualizados
+      .single(); // Espera um único registro
+
+    if (updateError) {
+      throw updateError;
+    }
     
-    if (result.rows.length === 0) {
+    if (!updatedVacina) {
       return NextResponse.json({ error: 'Vacina não encontrada' }, { status: 404 });
     }
     
-    return NextResponse.json(result.rows[0]);
+    return NextResponse.json(updatedVacina);
   } catch (error) {
     console.error('Erro ao atualizar vacina:', error);
+    // O Supabase retorna um objeto de erro, mas para o usuário final, 
+    // é melhor retornar uma mensagem genérica de erro interno.
     return NextResponse.json({ error: 'Erro interno do servidor ao atualizar vacina' }, { status: 500 });
   }
 }
 
 // DELETE - Deletar vacina pelo NOME
+// Este arquivo deve estar em: app/api/vacinas/[nomeVacina]/route.js
 export async function DELETE(request, { params }) {
   try {
-    const { id } = await params; // Na verdade será o nome codificado na URL
+    const { id } = params; 
     const nomeVacina = decodeURIComponent(id);
     
-    const result = await pool.query('DELETE FROM vacinas WHERE nome = $1 RETURNING *', [nomeVacina]);
-    
-    if (result.rows.length === 0) {
-      return NextResponse.json({ error: 'Vacina não encontrada' }, { status: 404 });
+    // Adaptação para Supabase: Primeiro, verifica se a vacina existe para retornar 404 se não existir
+    const { data: existingVacina, error: selectError } = await supabase
+      .from('vacinas')
+      .select('nome')
+      .eq('nome', nomeVacina)
+      .single();
+
+    if (selectError && selectError.code !== 'PGRST116') { // PGRST116 é "No rows found"
+        throw selectError;
+    }
+
+    if (!existingVacina) {
+        return NextResponse.json({ error: 'Vacina não encontrada' }, { status: 404 });
+    }
+
+    // Deleta a vacina
+    const { error: deleteError } = await supabase
+      .from('vacinas')
+      .delete()
+      .eq('nome', nomeVacina);
+
+    if (deleteError) {
+      throw deleteError;
     }
     
     return NextResponse.json({ message: 'Vacina deletada com sucesso' });
