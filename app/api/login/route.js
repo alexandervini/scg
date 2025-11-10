@@ -1,13 +1,13 @@
-import { Pool } from 'pg';
+import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
-const pool = new Pool({
-  host: 'localhost',
-  port: 5432,
-  database: 'postgres',
-  user: 'postgres',
-  password: '25052003',
-});
+// 1. Configuração do Cliente Supabase
+// As variáveis de ambiente devem ser configuradas no seu projeto Next.js
+// (ex: no arquivo .env.local)
+const supabaseUrl = "https://zvgehtwivjrtlplyjqbu.supabase.co";
+const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2Z2VodHdpdmpydGxwbHlqcWJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI3MzU4NDIsImV4cCI6MjA3ODMxMTg0Mn0.Pju7Jajk9yOebZSaZLmJGHVvGv_u89zAOPBzP4br0hA"; // Chave de Serviço (Service Role Key)
+
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // SOMENTE POST
 export async function POST(request) {
@@ -21,21 +21,31 @@ export async function POST(request) {
       );
     }
 
-    // Buscar usuário no banco de dados
-    const result = await pool.query(
-      'SELECT id, usuario FROM usuario WHERE usuario = $1 AND senha = $2',
-      [usuario, senha]
-    );
+    // 2. Substituição da lógica de consulta PG por Supabase
+    // A consulta direta ao banco de dados é feita com o método .from()
+    const { data: user, error } = await supabase
+      .from('usuario')
+      .select('id, usuario')
+      .eq('usuario', usuario)
+      .eq('senha', senha) // ATENÇÃO: Armazenar senhas em texto puro é INSEGURO.
+      .single();
 
-    if (result.rows.length === 0) {
+    if (error && error.code !== 'PGRST116') { // PGRST116 é o código para "nenhuma linha encontrada"
+      console.error('Erro na consulta Supabase:', error);
+      return NextResponse.json(
+        { error: 'Erro ao processar login' },
+        { status: 500 }
+      );
+    }
+
+    if (!user) {
       return NextResponse.json(
         { error: 'Usuário ou senha incorretos' },
         { status: 401 }
       );
     }
 
-    // Usuário encontrado - gerar um token simples
-    const user = result.rows[0];
+    // Usuário encontrado - gerar um token simples (mantendo a lógica original)
     const token = Buffer.from(`${user.id}:${user.usuario}`).toString('base64');
 
     return NextResponse.json(
