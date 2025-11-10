@@ -1,33 +1,43 @@
-import { Pool } from 'pg';
+import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
-const pool = new Pool({
-  host: 'localhost',
-  port: 5432,
-  database: 'postgres',
-  user: 'postgres',
-  password: '25052003', // Lembre-se de usar variáveis de ambiente
-});
+// Configuração do Supabase
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL = "https://zvgehtwivjrtlplyjqbu.supabase.co";
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2Z2VodHdpdmpydGxwbHlqcWJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI3MzU4NDIsImV4cCI6MjA3ODMxMTg0Mn0.Pju7Jajk9yOebZSaZLmJGHVvGv_u89zAOPBzP4br0hA";
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // GET - Listar todas as condições de gado
 export async function GET() {
   try {
-    const result = await pool.query(`
-      SELECT 
-        gc.id,
-        gc.gado_id,
-        gc.condicao,
-        g.identificacao as gado_identificacao
-      FROM gado_condicao gc
-      INNER JOIN gado g ON gc.gado_id = g.id
-      ORDER BY gc.id DESC
-    `);
-    // Retorna as linhas encontradas, que será um array (pode ser vazio)
-    return NextResponse.json(result.rows);
+    const { data, error } = await supabase
+      .from('gado_condicao')
+      .select(`
+        id,
+        gado_id,
+        condicao,
+        gado:gado_id (
+          identificacao
+        )
+      `)
+      .order('id', { ascending: false });
+
+    if (error) throw error;
+
+    // Formatar os dados para manter a estrutura original
+    const formattedData = data.map(item => ({
+      id: item.id,
+      gado_id: item.gado_id,
+      condicao: item.condicao,
+      gado_identificacao: item.gado?.identificacao
+    }));
+
+    return NextResponse.json(formattedData);
   } catch (error) {
     console.error('Erro ao listar condições:', error);
-    // Em caso de erro, retorna um objeto de erro e status 500
-    return NextResponse.json({ error: 'Erro interno ao buscar dados.' }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    );
   }
 }
 
@@ -37,26 +47,41 @@ export async function POST(request) {
     const { gado_id, condicao } = await request.json();
 
     if (!gado_id || !condicao) {
-      return NextResponse.json({ 
-        error: 'O gado e a condição são obrigatórios.' 
-      }, { status: 400 });
+      return NextResponse.json(
+        { error: 'O gado e a condição são obrigatórios.' },
+        { status: 400 }
+      );
     }
 
-    // Opcional: Verificar se o gado já tem uma condição para evitar duplicatas
-    const check = await pool.query('SELECT id FROM gado_condicao WHERE gado_id = $1', [gado_id]);
-    if (check.rows.length > 0) {
-        return NextResponse.json({ error: 'Este gado já possui uma condição registrada. Edite a existente.' }, { status: 409 });
+    // Verificar se o gado já tem uma condição
+    const { data: existing, error: checkError } = await supabase
+      .from('gado_condicao')
+      .select('id')
+      .eq('gado_id', gado_id)
+      .maybeSingle();
+
+    if (existing) {
+      return NextResponse.json(
+        { error: 'Este gado já possui uma condição registrada. Edite a existente.' },
+        { status: 409 }
+      );
     }
 
-    const result = await pool.query(
-      `INSERT INTO gado_condicao (gado_id, condicao)
-       VALUES ($1, $2) RETURNING *`,
-      [gado_id, condicao]
-    );
+    // Inserir nova condição
+    const { data, error } = await supabase
+      .from('gado_condicao')
+      .insert([{ gado_id, condicao }])
+      .select()
+      .single();
 
-    return NextResponse.json(result.rows[0], { status: 201 });
+    if (error) throw error;
+
+    return NextResponse.json(data, { status: 201 });
   } catch (error) {
     console.error('Erro ao registrar condição:', error);
-    return NextResponse.json({ error: 'Erro interno ao registrar a condição.' }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    );
   }
 }
