@@ -1,40 +1,49 @@
-import { Pool } from 'pg';
+// app/api/gado-vacinas/[id]/route.js
+import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
-const pool = new Pool({
-  host: 'localhost',
-  port: 5432,
-  database: 'postgres',
-  user: 'postgres',
-  password: '25052003',
-});
+// Configuração do Supabase
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://zvgehtwivjrtlplyjqbu.supabase.co";
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2Z2VodHdpdmpydGxwbHlqcWJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI3MzU4NDIsImV4cCI6MjA3ODMxMTg0Mn0.Pju7Jajk9yOebZSaZLmJGHVvGv_u89zAOPBzP4br0hA";
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // PUT - Atualizar registro de vacinação
 export async function PUT(request, { params }) {
   try {
-    const { id } = await params;
-    const data = await request.json();
-    const { gado_id, vacina_id, data_aplicacao, data_validade, status } = data;
+    const { id } = params;
+    const body = await request.json();
+    const { gado_id, vacina_id, data_aplicacao, data_validade, status } = body;
 
+    // Validação dos campos obrigatórios
     if (!gado_id || !vacina_id || !data_aplicacao) {
       return NextResponse.json({ 
         error: 'Gado, vacina e data de aplicação são obrigatórios' 
       }, { status: 400 });
     }
 
-    const result = await pool.query(
-      `UPDATE gado_vacinas 
-       SET gado_id = $1, vacina_id = $2, data_aplicacao = $3, 
-           data_validade = $4, status = $5
-       WHERE id = $6 RETURNING *`,
-      [gado_id, vacina_id, data_aplicacao, data_validade || null, status || 'aplicada', id]
-    );
+    // Atualizar o registro
+    const { data, error } = await supabase
+      .from('gado_vacinas')
+      .update({
+        gado_id,
+        vacina_id,
+        data_aplicacao,
+        data_validade: data_validade || null,
+        status: status || 'aplicada'
+      })
+      .eq('id', id)
+      .select()
+      .single();
 
-    if (result.rows.length === 0) {
-      return NextResponse.json({ error: 'Registro não encontrado' }, { status: 404 });
+    if (error) {
+      // Se não encontrou o registro
+      if (error.code === 'PGRST116') {
+        return NextResponse.json({ error: 'Registro não encontrado' }, { status: 404 });
+      }
+      throw error;
     }
 
-    return NextResponse.json(result.rows[0]);
+    return NextResponse.json(data);
   } catch (error) {
     console.error('Erro ao atualizar vacinação:', error);
     return NextResponse.json({ error: 'Erro ao atualizar vacinação' }, { status: 500 });
@@ -44,15 +53,21 @@ export async function PUT(request, { params }) {
 // DELETE - Deletar registro de vacinação
 export async function DELETE(request, { params }) {
   try {
-    const { id } = await params;
+    const { id } = params;
     
-    const result = await pool.query(
-      'DELETE FROM gado_vacinas WHERE id = $1 RETURNING *', 
-      [id]
-    );
+    const { data, error } = await supabase
+      .from('gado_vacinas')
+      .delete()
+      .eq('id', id)
+      .select()
+      .single();
 
-    if (result.rows.length === 0) {
-      return NextResponse.json({ error: 'Registro não encontrado' }, { status: 404 });
+    if (error) {
+      // Se não encontrou o registro
+      if (error.code === 'PGRST116') {
+        return NextResponse.json({ error: 'Registro não encontrado' }, { status: 404 });
+      }
+      throw error;
     }
 
     return NextResponse.json({ message: 'Vacinação deletada com sucesso' });

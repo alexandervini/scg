@@ -1,36 +1,54 @@
-import { Pool } from 'pg';
+// app/api/gado-vacinas/route.js
+import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
-const pool = new Pool({
-  host: 'localhost',
-  port: 5432,
-  database: 'postgres',
-  user: 'postgres',
-  password: '25052003',
-});
+// Configuração do Supabase
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://zvgehtwivjrtlplyjqbu.supabase.co";
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2Z2VodHdpdmpydGxwbHlqcWJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI3MzU4NDIsImV4cCI6MjA3ODMxMTg0Mn0.Pju7Jajk9yOebZSaZLmJGHVvGv_u89zAOPBzP4br0hA";
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // GET - Listar todos os registros de vacinação
 export async function GET() {
   try {
-    const result = await pool.query(`
-      SELECT 
-        gv.id,
-        gv.gado_id,
-        gv.vacina_id,
-        gv.data_aplicacao,
-        gv.data_validade,
-        gv.status,
-        g.identificacao as gado_identificacao,
-        v.nome as vacina_nome,
-        v.periodicidade_dias,
-        v.tem_reforco,
-        v.dias_reforco
-      FROM gado_vacinas gv
-      INNER JOIN gado g ON gv.gado_id = g.id
-      INNER JOIN vacinas v ON gv.vacina_id = v.id
-      ORDER BY gv.data_aplicacao DESC
-    `);
-    return NextResponse.json(result.rows);
+    const { data, error } = await supabase
+      .from('gado_vacinas')
+      .select(`
+        id,
+        gado_id,
+        vacina_id,
+        data_aplicacao,
+        data_validade,
+        status,
+        gado:gado_id (
+          identificacao
+        ),
+        vacinas:vacina_id (
+          nome,
+          periodicidade_dias,
+          tem_reforco,
+          dias_reforco
+        )
+      `)
+      .order('data_aplicacao', { ascending: false });
+
+    if (error) throw error;
+
+    // Formatar os dados para manter compatibilidade com o formato anterior
+    const formattedData = data.map(item => ({
+      id: item.id,
+      gado_id: item.gado_id,
+      vacina_id: item.vacina_id,
+      data_aplicacao: item.data_aplicacao,
+      data_validade: item.data_validade,
+      status: item.status,
+      gado_identificacao: item.gado?.identificacao || null,
+      vacina_nome: item.vacinas?.nome || null,
+      periodicidade_dias: item.vacinas?.periodicidade_dias || null,
+      tem_reforco: item.vacinas?.tem_reforco || null,
+      dias_reforco: item.vacinas?.dias_reforco || null
+    }));
+
+    return NextResponse.json(formattedData);
   } catch (error) {
     console.error('Erro ao listar vacinações:', error);
     return NextResponse.json({ error: 'Erro ao listar vacinações' }, { status: 500 });
@@ -40,22 +58,32 @@ export async function GET() {
 // POST - Registrar nova vacinação
 export async function POST(request) {
   try {
-    const data = await request.json();
-    const { gado_id, vacina_id, data_aplicacao, data_validade, status } = data;
+    const body = await request.json();
+    const { gado_id, vacina_id, data_aplicacao, data_validade, status } = body;
 
+    // Validação dos campos obrigatórios
     if (!gado_id || !vacina_id || !data_aplicacao) {
       return NextResponse.json({ 
         error: 'Gado, vacina e data de aplicação são obrigatórios' 
       }, { status: 400 });
     }
 
-    const result = await pool.query(
-      `INSERT INTO gado_vacinas (gado_id, vacina_id, data_aplicacao, data_validade, status)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [gado_id, vacina_id, data_aplicacao, data_validade || null, status || 'aplicada']
-    );
+    // Inserir o novo registro
+    const { data, error } = await supabase
+      .from('gado_vacinas')
+      .insert([{
+        gado_id,
+        vacina_id,
+        data_aplicacao,
+        data_validade: data_validade || null,
+        status: status || 'aplicada'
+      }])
+      .select()
+      .single();
 
-    return NextResponse.json(result.rows[0], { status: 201 });
+    if (error) throw error;
+
+    return NextResponse.json(data, { status: 201 });
   } catch (error) {
     console.error('Erro ao registrar vacinação:', error);
     return NextResponse.json({ error: 'Erro ao registrar vacinação' }, { status: 500 });
